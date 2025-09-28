@@ -23,3 +23,33 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+  
+  flink-jobmanager:
+    build: 
+      context: .
+      dockerfile: docker/flink/Dockerfile
+    hostname: flink-jobmanager
+    container_name: flink-jobmanager
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    volumes:
+      - ./src:/app
+      - ./flink-jars:/opt/flink/plugins
+  
+  flink-taskmanager:
+    build: 
+      context: .
+      dockerfile: docker/flink/Dockerfile
+    hostname: flink-taskmanager
+    container_name: flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    volumes:
+      - ./src:/app
+      - ./flink-jars:/opt/flink/plugins

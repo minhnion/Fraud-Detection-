@@ -13,7 +13,7 @@ config = {
     'auto.offset.reset': 'earliest'
 }
 
-topic = 'transactions'
+topic = 'fraud_alerts'
 
 def consume_messages():
     logger.info("Starting consumer...")
