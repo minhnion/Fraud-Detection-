@@ -1,9 +1,10 @@
 import os 
-from pyflink.common import WatermarkStrategy, SimpleStringSchema, Types
+from pyflink.common import WatermarkStrategy, SimpleStringSchema, Types, Row
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.connectors.kafka import KafkaSource, KafkaOffsetsInitializer
 from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig, RollingPolicy
 from pyflink.common.serialization import Encoder
+import json
 
 # Define the schema for the CSV data
 ROW_TYPE_INFO = Types.ROW_NAMED(
@@ -26,22 +27,44 @@ def kafka_to_minio_job():
 
     # Define Kafka source
     source = KafkaSource.builder() \
-        .set_bootstrap_servers('kafka:9092') \
+        .set_bootstrap_servers('kafka:29092') \
         .set_topics('transactions') \
         .set_group_id('flink-lake-writer-group') \
         .set_starting_offsets(KafkaOffsetsInitializer.earliest()) \
         .set_value_only_deserializer(SimpleStringSchema()) \
         .build()
     
+    print("Starting Kafka to MinIO Job...")
+
     source_stream = env.from_source(source, WatermarkStrategy.no_watermarks(), "Kafka Source")
 
+    source_stream.print() 
+
     def to_row(json_string):
-        import json
-        data = json.loads(json_string)
-        data['Class'] = int(data.get('Class', 0))
-        return tuple(data.get(field, None) for field in ROW_TYPE_INFO.get_field_names())
+        
+        print(f"MAP - Received JSON string: {json_string}")
+        
+        try:
+            data = json.loads(json_string)
+            field_names = ROW_TYPE_INFO.get_field_names()
+            
+            row_data = {}
+            for field in field_names:
+                if field == 'Class':
+                    row_data[field] = int(data.get(field, 0))
+                else:
+                    row_data[field] = data.get(field)
+
+            result_row = Row(**row_data)
+
+            print(f"MAP - Successfully created Row: {result_row}")
+            return result_row
+        except Exception as e:
+            print(f"MAP - FAILED to process record. Error: {e}, Record: {json_string}")
+            return None 
     
-    row_stream = source_stream.map(to_row, output_type=ROW_TYPE_INFO)
+    row_stream = source_stream.map(to_row, output_type=ROW_TYPE_INFO).filter(lambda r: r is not None)
+
 
     output_path = "s3a://datalake/raw/transactions/"
 
@@ -50,7 +73,7 @@ def kafka_to_minio_job():
         .with_output_file_config(
             OutputFileConfig.builder()
             .with_part_prefix("tx")
-            .with_part_suffix(".txt")
+            .with_part_suffix(".parquet")
             .build()) \
         .with_rolling_policy(
             RollingPolicy.default_rolling_policy(
