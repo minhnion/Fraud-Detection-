@@ -94,6 +94,7 @@ services:
     volumes:
       - ./src:/app
       - ./spark-jars:/opt/bitnami/spark/custom-jars
+      - ./data:/app/data
     environment:
       - SPARK_MODE=master
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
