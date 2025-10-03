@@ -101,90 +101,116 @@ Install Python dependencies:
 pip install -r requirements.txt
 ```
 
-### Bước 2: Huấn luyện Mô hình Machine Learning
+Some required JAR files for Spark–AWS integration are not included in this repository (due to GitHub’s file size limit).  
+You need to manually download them and place them into the `spark-jars/` directory.
 
-Chạy script để huấn luyện và lưu mô hình.  
-Mô hình này sẽ được lưu dưới dạng file `.pkl` và được Flink job tải lên từ MinIO để dự đoán.
+Create the `spark-jars` directory
+```bash
+mkdir -p spark-jars
+cd spark-jars
+```
+Download the required JAR files
+```bash
+# AWS Java SDK Bundle
+wget https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
+
+# Hadoop AWS
+wget https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar
+```
+
+Verify
+
+Make sure the spark-jars/ directory contains the following files:
+```bash
+spark-jars/
+├── aws-java-sdk-bundle-1.12.262.jar
+└── hadoop-aws-3.3.4.jar
+```
+### Step 2: Train Machine Learning Model
+
+Run the script to train and save the model.  
+This model will be saved as a `.pkl` file and loaded by the Flink job from MinIO for prediction.
 
 ```bash
 python train_sklearn_model.py
 ```
-Sau khi chạy, bạn sẽ thấy file sklearn_fraud_model.pkl được tạo trong thư mục data/model/.
+After running, you will see the file sklearn_fraud_model.pkl created in the data/model/ directory.
 
-### Bước 3: Khởi động Hạ tầng Big Data
+### Step 3: Start Big Data Infrastructure
 
-Sử dụng **Docker Compose** để xây dựng Flink image và khởi động toàn bộ các dịch vụ (Kafka, Flink, MinIO):
+Use **Docker Compose** to build the Flink image and start all services (Kafka, Flink, MinIO):
 
 ```bash
 docker-compose up --build -d
 ```
-Trong đó:
-Tùy chọn --build đảm bảo Flink image được rebuild với các thư viện ML đã khai báo trong Dockerfile. Tuỳ chọn -d chạy các container ở chế độ nền (detached mode).
+In which:
+The --build option ensures the Flink image is rebuilt with the ML libraries declared in the Dockerfile.
+The -d option runs the containers in detached mode (background).
 
-### Bước 4: Chuẩn bị MinIO và Kafka Topics
+### Step 4: Prepare MinIO and Kafka Topics
 
-#### 1. Tạo MinIO Bucket
-- Mở trình duyệt và truy cập: [http://localhost:9001](http://localhost:9001)  
-- Đăng nhập với tài khoản mặc định:
+#### 1. Create MinIO Bucket
+- Open the browser and go to: [http://localhost:9001](http://localhost:9001)  
+- Log in with the default account:
   - **User:** `minioadmin`
   - **Password:** `minioadmin`  
-- Nhấn **"Create Bucket"** và tạo một bucket mới tên là **`datalake`**
+- Click **"Create Bucket"** and create a new bucket named **`datalake`**
 
-#### 2. (Tùy chọn nhưng khuyến khích) Tạo Kafka Topics
-Chạy các lệnh sau để tạo sẵn topic, tránh lỗi *"Unknown Topic"* khi Flink job chạy:
+#### 2. (Optional but recommended) Create Kafka Topics
+Run the following commands to pre-create topics and avoid *"Unknown Topic"* errors when the Flink job runs:
 
 ```bash
 docker exec -it kafka kafka-topics --create --topic transactions --bootstrap-server kafka:29092
 docker exec -it kafka kafka-topics --create --topic fraud_alerts --bootstrap-server kafka:29092
 ```
 
-### Bước 5: Chạy Pipeline Hoàn chỉnh
+### Step 5: Run the Complete Pipeline
 
-Bạn sẽ cần mở **3 cửa sổ terminal riêng biệt** để khởi động toàn bộ pipeline.
+You will need to open **3 separate terminal windows** to start the entire pipeline.
 
 ---
 
 #### 🖥️ Terminal 1 – Submit Flink Jobs
-Nộp cả hai Flink job để bắt đầu xử lý dữ liệu:
+Submit both Flink jobs to start data processing:
 
 ```bash
-# Job 1: Dùng ML để phát hiện gian lận
+# Job 1: Use ML to detect fraud
 docker exec -it flink-jobmanager /opt/flink/bin/flink run -py /app/flink_jobs/ml_inference_job.py
 
-# Job 2: Lưu trữ dữ liệu thô vào MinIO
+# Job 2: Store raw data into MinIO
 docker exec -it flink-jobmanager /opt/flink/bin/flink run -py /app/flink_jobs/kafka_to_minio_job.py
 ```
-📌 Kiểm tra: Truy cập Flink UI tại http://localhost:8081
+📌 Check: Access Flink UI at http://localhost:8081
 
-### 🖥️ Terminal 2 – Chạy Consumer để nhận Cảnh báo
+### 🖥️ 🖥️ Terminal 2 – Run Consumer to Receive Alerts
 
-Consumer script sẽ lắng nghe và in ra các cảnh báo gian lận mà Flink phát hiện:
+The consumer script will listen and print fraud alerts detected by Flink:
 
 ```bash
 python src/consumer/consumer.py
 ```
-(Terminal này sẽ luôn chờ để hiển thị tin nhắn từ Kafka.)
+(This terminal will keep waiting to display messages from Kafka.)
 
-### 🖥️ Terminal 3 – Chạy Producer để gửi Dữ liệ
-Producer script bắt đầu phát dữ liệu giao dịch vào Kafka:
+### 🖥️ Terminal 3 – Run Producer to Send Data
+The producer script starts sending transaction data into Kafka:
 ```bash
 python src/producer/producer.py
 ```
-👉 Đây là bước cuối cùng để kích hoạt toàn bộ luồng dữ liệu.
+👉 This is the final step to activate the entire data flow.
 
-### Bước 6: Quan sát Kết quả
+### Step 6: Observe the Results
 
 - **Terminal 2 (Consumer):**  
-  Bạn sẽ thấy các bản ghi giao dịch đầy đủ được in ra màn hình mỗi khi mô hình ML dự đoán một giao dịch là **gian lận**.
+  You will see full transaction records printed on the screen whenever the ML model predicts a transaction as **fraudulent**.
 
 - **MinIO UI ([http://localhost:9001](http://localhost:9001)):**  
-  Sau vài phút, truy cập bucket **`datalake`** → bạn sẽ thấy thư mục **`raw/transactions/`** được tạo, trong đó chứa các tệp dữ liệu giao dịch thô mà Flink đã ghi vào.
+  After a few minutes, access the **`datalake`** bucket → you will see the **`raw/transactions/`** directory created, containing the raw transaction data files written by Flink.
 
 ---
 
-### Bước 7: Dọn dẹp
+### Step 7: Cleanup
 
-Để dừng và xóa toàn bộ các container đang chạy, dùng lệnh:
+To stop and remove all running containers, use the command:
 
 ```bash
 docker-compose down
